@@ -1,0 +1,345 @@
+https://medium.com/analytics-vidhya/an-introduction-to-time-series-analysis-2a12d3702299#:~:text=This%20is%20necessary%20because%20if,problem%20in%20accuracy%20of%20model.
+
+https://www.bounteous.com/insights/2020/09/15/forecasting-time-series-model-using-python-part-one/#get-to-know-your-dataset
+
+import openpyxl
+import os
+from datetime import datetime
+from pandas import DataFrame
+import pandas as pd
+import numpy as np
+import statsmodels.api as sm
+import seaborn as sns
+import matplotlib.pyplot as plt
+from statsmodels.tsa.seasonal import seasonal_decompose
+from dateutil.parser import parse
+from pandas import DataFrame
+from pandas import concat
+from matplotlib import pyplot
+from sklearn.metrics import mean_squared_error
+from math import sqrt
+from statsmodels.graphics.tsaplots import plot_acf,plot_pacf
+import matplotlib.pyplot as plt
+
+path="C:\\Users\\s6289819\\Desktop\\Documents\\Gold Predictor\\DailyPrice"
+dir_list = os.listdir(path)
+df_rawdata = pd.DataFrame()
+for x in os.listdir(path):
+    if x.endswith(".xlsx"):
+        # Prints only text file present in My Folder
+        #print(x)
+        fileloc = "C:\\Users\\s6289819\\Desktop\\Documents\\Gold Predictor\\DailyPrice\\"+x
+        data = pd.read_excel(fileloc)
+        df_rawdata=df_rawdata.append(data,ignore_index=True)
+print(df_rawdata)
+
+goldprice_per10grms=[]
+goldprice=0
+for index,row in df_rawdata.iterrows():
+    if(row['Traded Contract(Lots)']==0 or row['Total Value (Lacs)']*100000==0):
+        #print(row)
+        goldprice=np.nan
+    else:
+        #print(row)
+        goldprice=round(((row['Total Value (Lacs)']*100000)/(row['Traded Contract(Lots)']*1000))*10,2)
+    goldprice_per10grms.append(goldprice)
+df_gooldprice_per_10gms=pd.Series(goldprice_per10grms,name='price/10gms')
+df_rawdata=pd.concat([df_rawdata,df_gooldprice_per_10gms],axis=1)
+df_rawdata.isnull().sum()
+#df_rawdata.set_index(['Date'],inplace=True)
+
+df_rawdata.loc[(df_rawdata['price/10gms']<=1000) & (df_rawdata['Commodity']=='GOLD')]
+
+There is one record where price of gold is63.17 rupees which is not correct.We have replace this value with appropiate values.
+
+df_rawdata['price/10gms']=df_rawdata['price/10gms'].replace(63.17,np.nan)
+df_rawdata.loc[(df_rawdata['price/10gms']<=1000) & (df_rawdata['Commodity']=='GOLD')]
+
+#filtering only Commodity as GOLD and checking for duplicate Dates in datasets
+df_goldprice=df_rawdata.loc[df_rawdata['Commodity']=='GOLD'][['Date','price/10gms']].copy()
+#r = pd.date_range(start=df_goldprice.Date.min(), end=df_goldprice.Date.max())
+#df_goldprice_with_missingDates=df_goldprice.set_index('Date').reindex(r).rename_axis('Date').reset_index()
+df_goldprice[df_goldprice['Date'].duplicated()==True]
+
+df_goldprice.loc[df_goldprice['Date']=='2017-10-17']
+
+we will keep the last value incase there are duplicate entry for a date.
+
+df_goldprice=df_goldprice.drop_duplicates(subset=['Date'],keep='last')
+df_goldprice[df_goldprice['Date'].duplicated()==True]
+
+df_goldprice.set_index(['Date'],inplace=True)
+
+
+df_goldprice.filter(like='2009-01-01',axis=0)
+
+#Checking for Null Values.
+df_goldprice.isnull().sum()
+
+#fillingup these null values with Interpolation
+df_goldprice_interpolateNAN=df_goldprice.interpolate()
+df_goldprice_interpolateNAN.isnull().sum()
+
+##Identifying missing day date and forwardfilling the values asa time series model requires data for all dates.
+df_goldprice_interpolateNAN.reset_index(inplace=True)
+r = pd.date_range(start=df_goldprice_interpolateNAN.Date.min(), end=df_goldprice_interpolateNAN.Date.max())
+df_goldprice_with_missingDates=df_goldprice_interpolateNAN.set_index('Date').reindex(r).rename_axis('Date').reset_index()
+df_goldprice_with_missingDates
+
+
+#Checking for Null Values.
+df_goldprice_with_missingDates.isnull().sum()
+
+#filling up these null values with forward fill as the missing day are for weekends and price of gold will remain same
+as end of friday
+
+#Forward filling of Missing data
+df_goldprice_clean_data=df_goldprice_with_missingDates.ffill()
+df_goldprice_clean_data.isnull().sum()
+
+Aggregating daily datasets to weekly datasets as it quite challenging to work with daily datasets
+
+#Resamopling the data into weekly dataset
+df_goldprice_clean_data.set_index(['Date'],inplace=True)
+df_resample_Dataset_weekly=df_goldprice_clean_data.resample('W').mean()
+df_resample_Dataset_monthly=df_goldprice_clean_data.resample('M').mean()
+
+plt.rcParams.update({'figure.figsize':(5,5), 'figure.dpi':120})
+fig, ax = plt.subplots(2,constrained_layout = True)
+df_resample_Dataset_weekly.plot(ax=ax[0],title="Weekly Sampled")
+df_resample_Dataset_monthly.plot(ax=ax[1],title="Monthly Sampled")
+
+plt.rcParams.update({'figure.figsize':(5,5), 'figure.dpi':50})
+fig, ax = plt.subplots(figsize=(20, 15))
+ax.plot(df_resample_Dataset_weekly,marker='.', linestyle='-', label='Weekly')
+ax.plot(df_resample_Dataset_monthly,marker='o', markersize=1, linestyle='-', label='Monthly')
+ax.set_ylabel('price/10gms')
+ax.legend();
+
+The seasonal change is additive as the value of gold gradually increases with time.
+
+Level	The average value in the series
+
+Trend	Increases, decreases, or stays the same over time
+Seasonal or Periodic	Pattern repeats periodically over time
+Cyclical	Pattern that increases and decreases but usually related to non-seasonal activity, like business cycles
+Random or Irregular Variations	Increases and decreases that don’t have any apparent pattern
+
+plt.rcParams.update({'figure.figsize':(15,10), 'figure.dpi':50})
+from statsmodels.tsa.seasonal import seasonal_decompose
+df_goldprice_clean_data_sample=df_resample_Dataset_weekly[datetime(2015,1,1):datetime(2021,12,31)]
+decompose_data = seasonal_decompose(df_goldprice_clean_data_sample['price/10gms'].dropna(), model="additive")
+decompose_data.plot()
+plt.show()
+
+The seasonal decompose clearly tells us that the dataset has yearly seasonality.Hence the lag component(L) will be 52 as it
+is a weekly data series
+
+#Checking for staionarity of the dataset
+
+#Visual identification
+### plot for Rolling Statistic for testing Stationarity
+def test_stationarity(timeseries, title):
+    
+    #Determing rolling statistics
+    rolmean = pd.Series(timeseries).rolling(window=52).mean() 
+    rolstd = pd.Series(timeseries).rolling(window=52).std()
+    
+    fig, ax = plt.subplots(figsize=(16, 4))
+    ax.plot(timeseries, label= title)
+    ax.plot(rolmean, label='rolling mean');
+    ax.plot(rolstd, label='rolling std (x10)');
+    ax.legend()
+
+test_stationarity(df_resample_Dataset_weekly["price/10gms"],'rawdata')
+
+Mean of the dataset changes over the time whereas standard deviation remain the same.Moreover thw scale of data is more than 50000 hence we cannot be sure about stationarity oof data only by looking at above plot.
+
+#Now using Dickfuller Test to stationarity of data
+from statsmodels.tsa.stattools import adfuller
+
+def ADF_test(timeseries, dataDesc):
+    print(' > Is the {} stationary ?'.format(dataDesc))
+    dftest = adfuller(timeseries.dropna(), autolag='AIC')
+    print('Test statistic = {:.3f}'.format(dftest[0]))
+    print('P-value = {:.3f}'.format(dftest[1]))
+    print('Critical values :')
+    for k, v in dftest[4].items():
+        print('\t{}: {} - The data is {} stationary with {}% confidence'.format(k, v, 'not' if v<dftest[0] else '', 100-int(k[:-1])))
+
+ADF_test(df_resample_Dataset_weekly["price/10gms"],'rawdata')
+
+Now we can confirm that data is not stationary as p value is more than 0.05.
+
+#DeTrending of Data for further analysis
+y_detrend =  (df_resample_Dataset_weekly["price/10gms"] - df_resample_Dataset_weekly["price/10gms"].rolling(window=52).mean())/df_resample_Dataset_weekly["price/10gms"].rolling(window=52).std()
+
+test_stationarity(y_detrend,'de-trended data')
+ADF_test(y_detrend,'de-trended data')
+
+The Data is stationary as we see realtive smoothness in rolling mean and standard deviation.
+
+#DIfferencing removes underlying seasonal effect
+df_resample_Dataset_weekly_52lag =  df_resample_Dataset_weekly["price/10gms"] - df_resample_Dataset_weekly["price/10gms"].shift(52)
+
+test_stationarity(df_resample_Dataset_weekly_52lag,'52 lag differenced data')
+ADF_test(df_resample_Dataset_weekly_52lag,'52 lag differenced data')
+
+The differencing method didn't work well as th stationarity failed at one of the critical values
+
+Combining Detrending and Differencing
+
+#Detrending + Differencing
+df_resample_Dataset_weekly52lag_detrend =  y_detrend - y_detrend.shift(52)
+
+test_stationarity(df_resample_Dataset_weekly52lag_detrend,'52 lag differenced de-trended data')
+ADF_test(df_resample_Dataset_weekly52lag_detrend,'52 lag differenced de-trended data')
+
+Using the combination of the two methods, we see from both the visualization and the ADF test that the data is now stationary. This is the transformation we will use moving forward with our analysis.
+
+Using grid search to get best fit Trend parameter(p,q,d) and Seasonal(P,Q,D)
+
+import itertools
+
+def sarima_grid_search(y,seasonal_period):
+    p = d = q = range(0, 2)
+    pdq = list(itertools.product(p, d, q))
+    seasonal_pdq = [(x[0], x[1], x[2],seasonal_period) for x in list(itertools.product(p, d, q))]
+    
+    mini = float('+inf')
+    
+    
+    for param in pdq:
+        for param_seasonal in seasonal_pdq:
+            try:
+                mod = sm.tsa.statespace.SARIMAX(y,
+                                                order=param,
+                                                seasonal_order=param_seasonal,
+                                                enforce_stationarity=False,
+                                                enforce_invertibility=False)
+
+                results = mod.fit()
+                
+                if results.aic < mini:
+                    mini = results.aic
+                    param_mini = param
+                    param_seasonal_mini = param_seasonal
+
+                print('SARIMA{}x{} - AIC:{}'.format(param, param_seasonal, results.aic))
+            except:
+                continue
+    print('The set of parameters with the minimum AIC is: SARIMA{}x{} - AIC:{}'.format(param_mini, param_seasonal_mini, mini))
+
+sarima_grid_search(df_resample_Dataset_weekly["price/10gms"],52)
+
+y_to_train=df_resample_Dataset_weekly[:'2021-12-26']
+y_to_val=df_resample_Dataset_weekly['2022-01-02':]
+predict_date = len(df_resample_Dataset_weekly["price/10gms"]) - len(df_resample_Dataset_weekly["price/10gms"][:'2022-01-02']) # the number of data points for the test set
+
+# Call this function after pick the right(p,d,q) for SARIMA based on AIC               
+def sarima_eva(y,order,seasonal_order,seasonal_period,pred_date,y_to_test):
+    # fit the model 
+    mod = sm.tsa.statespace.SARIMAX(y,
+                                order=order,
+                                seasonal_order=seasonal_order,
+                                enforce_stationarity=False,
+                                enforce_invertibility=False)
+
+    results = mod.fit()
+    print(results.summary().tables[1])
+    
+    results.plot_diagnostics(figsize=(16, 8))
+    plt.show()
+    
+    # The dynamic=False argument ensures that we produce one-step ahead forecasts, 
+    # meaning that forecasts at each point are generated using the full history up to that point.
+    pred = results.get_prediction(start=pd.to_datetime(pred_date), dynamic=False)
+    pred_ci = pred.conf_int()
+    y_forecasted = pred.predicted_mean
+    mse = ((y_forecasted - y_to_test) ** 2).mean()
+    print('The Root Mean Squared Error of SARIMA with season_length={} and dynamic = False {}'.format(seasonal_period,round(np.sqrt(mse), 2)))
+
+    ax = y.plot(label='observed')
+    y_forecasted.plot(ax=ax, label='One-step ahead Forecast', alpha=.7, figsize=(14, 7))
+    ax.fill_between(pred_ci.index,
+                    pred_ci.iloc[:, 0],
+                    pred_ci.iloc[:, 1], color='k', alpha=.2)
+
+    ax.set_xlabel('Date')
+    ax.set_ylabel('Sessions')
+    plt.legend()
+    plt.show()
+
+    # A better representation of our true predictive power can be obtained using dynamic forecasts. 
+    # In this case, we only use information from the time series up to a certain point, 
+    # and after that, forecasts are generated using values from previous forecasted time points.
+    pred_dynamic = results.get_prediction(start=pd.to_datetime(pred_date), dynamic=True, full_results=True)
+    pred_dynamic_ci = pred_dynamic.conf_int()
+    y_forecasted_dynamic = pred_dynamic.predicted_mean
+    mse_dynamic = ((y_forecasted_dynamic - y_to_test) ** 2).mean()
+    print('The Root Mean Squared Error of SARIMA with season_length={} and dynamic = True {}'.format(seasonal_period,round(np.sqrt(mse_dynamic), 2)))
+
+    ax = y.plot(label='observed')
+    y_forecasted_dynamic.plot(label='Dynamic Forecast', ax=ax,figsize=(14, 7))
+    ax.fill_between(pred_dynamic_ci.index,
+                    pred_dynamic_ci.iloc[:, 0],
+                    pred_dynamic_ci.iloc[:, 1], color='k', alpha=.2)
+
+    ax.set_xlabel('Date')
+    ax.set_ylabel('Sessions')
+
+    plt.legend()
+    plt.show()
+    
+    return (results)
+
+model = sarima_eva(df_resample_Dataset_weekly['price/10gms'],(1, 1, 1),(1, 1, 1, 52),52,'2022-01-02',y_to_val)
+
+There are a few things to check to help you get the most out of these diagnostic graphs:
+
+1. The top left plot shows the residuals over time. We do not want to see any obvious seasonality here and the messier it is, the better we can say we found the trend and seasonality in our data and removed the noise.
+
+2. In the top-right plot, we want to see that the red KDE line follows closely with the N(0,1) line to indicate that the residuals are normally distributed. This line is the standard notation for a normal distribution with a mean of 0 and a standard deviation of 1.
+
+3. In the bottom left qq-plot, you see the ordered distribution of residuals (blue dots) following the linear trend (red line) of the samples taken from a standard normal distribution with N(0, 1).
+
+4. The autocorrelation visual (called a “correlogram”) on the bottom right shows that the time series residuals have a low correlation with the lagged versions of itself (that is, the majority of dots fall into the blue shaded area).
+
+By validating all the four points above, we can conclude that this model’s residuals are near normally distributed. This indicates we have found a well-fit model suitable for our dataset.
+
+# Making Predictions
+Now that we have a well-fit model, let’s do some forecasting!
+
+To get the forecast for price in the next year, we enter steps=52. 
+The results produce both a table showing the Predicted_Mean, Lower Bound and Upper Bound, and the prediction graphs.
+
+def forecast(model,predict_steps,y):
+    
+    pred_uc = model.get_forecast(steps=predict_steps)
+
+    #SARIMAXResults.conf_int, can change alpha,the default alpha = .05 returns a 95% confidence interval.
+    pred_ci = pred_uc.conf_int()
+
+    ax = y.plot(label='observed', figsize=(14, 7))
+#     print(pred_uc.predicted_mean)
+    pred_uc.predicted_mean.plot(ax=ax, label='Forecast')
+    ax.fill_between(pred_ci.index,
+                    pred_ci.iloc[:, 0],
+                    pred_ci.iloc[:, 1], color='k', alpha=.25)
+    ax.set_xlabel('Date')
+    ax.set_ylabel('price/10gms')
+
+    plt.legend()
+    plt.show()
+    
+    # Produce the forcasted tables 
+    pm = pred_uc.predicted_mean.reset_index()
+    pm.columns = ['Date','Predicted_Mean']
+    pci = pred_ci.reset_index()
+    pci.columns = ['Date','Lower Bound','Upper Bound']
+    final_table = pm.join(pci.set_index('Date'), on='Date')
+    
+    return (final_table)
+
+final_table = forecast(model,52,df_resample_Dataset_weekly)
+final_table
